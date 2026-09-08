@@ -27,4 +27,27 @@ export const validateRegisterFields = ({ first_name, last_name, email, password 
 
 export const normalizeEmail = (email) => String(email).trim().toLowerCase();
 
-export default { validateRegisterFields, normalizeEmail, MIN_PASSWORD_LENGTH };
+/**
+ * Valida los campos mínimos para crear/modificar un evento.
+ * `partial: true` (usado en updates) solo valida los campos que vinieron,
+ * sin exigir que estén todos presentes.
+ */
+export const validateEventFields = ({ title, date }, { partial = false } = {}) => {
+  if (!partial) {
+    if (!title || !date) {
+      return { valid: false, message: 'Faltan campos obligatorios: title y date son requeridos' };
+    }
+  }
+
+  if (date !== undefined && Number.isNaN(new Date(date).getTime())) {
+    return { valid: false, message: 'El formato de la fecha (date) es inválido' };
+  }
+
+  if (title !== undefined && String(title).trim().length === 0) {
+    return { valid: false, message: 'El título (title) no puede estar vacío' };
+  }
+
+  return { valid: true };
+};
+
+export default { validateRegisterFields, normalizeEmail, validateEventFields, MIN_PASSWORD_LENGTH };

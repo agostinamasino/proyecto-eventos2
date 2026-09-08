@@ -24,4 +24,14 @@ export const create = async (userData) => {
   return User.create(userData);
 };
 
-export default { findByEmail, create };
+/**
+ * Lista todos los usuarios (ruta administrativa). No hace falta
+ * `.select('+password')` acá: al no pedirlo, el modelo ya lo excluye por
+ * defecto, así que nunca viaja el hash fuera de la base.
+ */
+export const findAll = async () => {
+  ensureConnected();
+  return User.find().lean();
+};
+
+export default { findByEmail, create, findAll };

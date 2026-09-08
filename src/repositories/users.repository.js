@@ -8,4 +8,8 @@ export const create = async (userData) => {
   return usersDao.create(userData);
 };
 
-export default { findByEmail, create };
+export const findAll = async () => {
+  return usersDao.findAll();
+};
+
+export default { findByEmail, create, findAll };

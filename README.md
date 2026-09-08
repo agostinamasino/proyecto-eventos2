@@ -4,11 +4,12 @@ Backend II (Coderhouse) — API REST con Express organizada por capas, para una 
 
 - **Pre-entrega 1:** base arquitectónica (estructura de carpetas, servidor Express, endpoints iniciales de `events` y `sessions`).
 - **Pre-entrega 2:** registro seguro de usuarios (`POST /api/sessions/register`) con validaciones, normalización de email, hash de contraseña con bcrypt y persistencia en MongoDB.
-- **Pre-entrega 3 (actual):** login con JWT, cookie de autenticación HttpOnly, ruta protegida `GET /api/sessions/current` y logout.
+- **Pre-entrega 3:** login con JWT, cookie de autenticación HttpOnly, ruta protegida `GET /api/sessions/current` y logout.
+- **Pre-entrega 4 (actual):** refactor de la autenticación para que pase por estrategias de **Passport.js** (`register`, `login`, `current`), centralizadas en `src/config/passport.config.js`. El contrato externo de la API (rutas, requests, responses) no cambia respecto de la pre-entrega 3 — solo mejora la organización interna.
 
 ## Temática elegida
 
-Plataforma de gestión de **eventos** (charlas, meetups, conferencias) donde los usuarios podrán registrarse, iniciar sesión, inscribirse a eventos y a sus sesiones/charlas. Hasta esta etapa está implementado el flujo completo de autenticación: registro, login, sesión vía cookie + JWT y logout. Roles y autorización por rol, gestión completa de eventos, inscripciones y control de cupos quedan para las próximas entregas.
+Plataforma de gestión de **eventos** (charlas, meetups, conferencias) donde los usuarios podrán registrarse, iniciar sesión, inscribirse a eventos y a sus sesiones/charlas. Hasta esta etapa está implementado el flujo completo de autenticación (registro, login, sesión vía cookie + JWT y logout), ahora organizado con Passport y preparado para sumar proveedores externos (Google, GitHub, etc.) más adelante. Roles y autorización por rol, gestión completa de eventos, inscripciones y control de cupos quedan para las próximas entregas.
 
 ## Tecnologías
 
@@ -17,6 +18,7 @@ Plataforma de gestión de **eventos** (charlas, meetups, conferencias) donde los
 - Mongoose (ODM para MongoDB)
 - bcrypt (hash de contraseñas)
 - jsonwebtoken (JWT)
+- Passport, passport-local, passport-jwt (estrategias de autenticación)
 - cookie-parser (lectura de cookies en Express)
 - dotenv (variables de entorno)
 - Módulos ESM (`import` / `export`)
@@ -112,7 +114,8 @@ proyecto-eventos/
 │   ├── server.js                    # Levanta el servidor y conecta a la base de datos.
 │   ├── config/
 │   │   ├── config.js                # Lectura de variables de entorno (dotenv)
-│   │   └── db.js                    # Conexión a MongoDB (Mongoose)
+│   │   ├── db.js                    # Conexión a MongoDB (Mongoose)
+│   │   └── passport.config.js       # Estrategias de Passport: 'register', 'login' y 'current' (JWT)
 │   ├── routes/
 │   │   ├── index.router.js          # Router principal, agrupa el resto de rutas bajo /api
 │   │   ├── health.router.js         # GET /api/health
@@ -121,14 +124,14 @@ proyecto-eventos/
 │   ├── controllers/
 │   │   ├── health.controller.js
 │   │   ├── events.controller.js
-│   │   └── sessions.controller.js   # traduce el resultado de sessions.service a respuesta HTTP + cookie
+│   │   └── sessions.controller.js   # dispara las estrategias de Passport y traduce el resultado a respuesta HTTP + cookie
 │   ├── services/
 │   │   ├── events.service.js
-│   │   └── sessions.service.js      # registerUser() y loginUser(): validación, hash, JWT
+│   │   └── sessions.service.js      # deprecado desde la pre-entrega 4 (ver más abajo); se deja vacío para conservar la estructura
 │   ├── repositories/
 │   │   ├── events.repository.js
 │   │   ├── sessions.repository.js   # placeholder, sin lógica propia por ahora
-│   │   └── users.repository.js      # findByEmail / create, usado por sessions.service
+│   │   └── users.repository.js      # findByEmail / create, usado por las estrategias de Passport
 │   ├── dao/
 │   │   ├── events.dao.js
 │   │   ├── sessions.dao.js          # placeholder, sin lógica propia por ahora
@@ -139,20 +142,22 @@ proyecto-eventos/
 │   ├── middlewares/
 │   │   ├── errorHandler.js
 │   │   ├── notFoundHandler.js
-│   │   └── auth.middleware.js       # lee la cookie `currentUser`, verifica el JWT, arma req.user
+│   │   └── auth.middleware.js       # ejecuta la estrategia 'current' de Passport (JWT desde la cookie) y arma req.user
 │   └── utils/
 │       ├── logger.js
-│       ├── hash.js                  # hashPassword / comparePassword con bcrypt (reutilizable)
-│       ├── jwt.js                   # signToken / verifyToken con jsonwebtoken (reutilizable)
+│       ├── hash.js                  # hashPassword / comparePassword con bcrypt (usado por la estrategia 'register')
+│       ├── jwt.js                   # signToken / verifyToken con jsonwebtoken (usado por el controller de login y por la estrategia 'current')
 │       ├── validators.js            # validación de campos de registro + normalización de email
-│       └── apiError.js              # Error con status HTTP para cortar temprano desde el service
+│       └── apiError.js              # Error con status HTTP para cortar temprano desde las capas inferiores
 ├── .env.example
 ├── .gitignore
 ├── package.json
 └── README.md
 ```
 
-La API sigue una arquitectura por capas: **rutas → controladores → servicios → repositorios → DAO → modelos**. Cada capa solo se comunica con la inmediatamente inferior. `app.js` y las rutas no tienen lógica de negocio: toda la validación, el hash y la generación/verificación de JWT viven en `services/sessions.service.js`, `middlewares/auth.middleware.js` y los helpers de `utils/`.
+La API sigue una arquitectura por capas: **rutas → controladores → servicios → repositorios → DAO → modelos**. Cada capa solo se comunica con la inmediatamente inferior. `app.js` y las rutas no tienen lógica de negocio.
+
+Desde la pre-entrega 4, la autenticación pasa por **Passport.js**: toda la lógica de validación, hash de contraseña, unicidad de email y verificación de credenciales vive dentro de las estrategias definidas en `config/passport.config.js`, no en `services/sessions.service.js` (que queda vacío/deprecado, conservado solo para no romper la estructura de carpetas). Los controllers de `sessions.controller.js` disparan esas estrategias con `passport.authenticate(...)` y se limitan a traducir el resultado a una respuesta HTTP — y, en el caso de `login`, a generar el JWT y setear la cookie una vez que Passport confirmó que las credenciales son válidas. Ver la sección **"Autenticación con Passport.js"** más abajo para el detalle de cada estrategia.
 
 ## Rutas disponibles
 
@@ -164,6 +169,23 @@ La API sigue una arquitectura por capas: **rutas → controladores → servicios
 | POST   | `/api/sessions/login`        | Login: valida credenciales y setea la cookie de sesión  | No |
 | GET    | `/api/sessions/current`      | Devuelve `{ id, email, role }` del usuario autenticado  | **Sí** (middleware `auth`, vía cookie `currentUser`) |
 | POST   | `/api/sessions/logout`       | Cierra la sesión (borra la cookie)                       | No |
+
+## Autenticación con Passport.js
+
+Desde la pre-entrega 4, toda la autenticación se maneja con **Passport.js**, con las tres estrategias registradas en un único archivo: `src/config/passport.config.js`. `app.js` solo hace `app.use(passport.initialize())` — no conoce el detalle de ninguna estrategia, y las rutas (`sessions.router.js`) no cambiaron respecto de la pre-entrega 3.
+
+| Estrategia | Tipo | Dónde se usa | Qué hace |
+|---|---|---|---|
+| `register` | `passport-local` (sobre `email`/`password`) | `POST /api/sessions/register` | Valida los campos, normaliza el email, chequea que no exista otro usuario con ese email, hashea el password con bcrypt y crea el usuario. |
+| `login` | `passport-local` (sobre `email`/`password`) | `POST /api/sessions/login` | Busca el usuario por email y compara el password con bcrypt (`comparePassword`). No genera JWT ni toca cookies. |
+| `current` | `passport-jwt` | `GET /api/sessions/current` (a través del middleware `auth`) | Extrae el JWT de la cookie `currentUser` (extractor propio, en vez del header `Authorization`) y lo verifica. |
+
+Puntos importantes de cómo está armado:
+
+- Las tres estrategias se registran con `passport.use(...)` dentro de `passport.config.js`; importar ese archivo (lo hace `app.js`) alcanza para que Passport las tenga disponibles en toda la app.
+- El JWT y la cookie **no** se generan dentro de la estrategia `login`: la estrategia solo confirma que las credenciales son correctas y le pasa el usuario a `done(null, user)`. Es el controller `login` en `sessions.controller.js` el que, ya con la autenticación resuelta, llama a `signToken(...)` y hace `res.cookie('currentUser', token, {...})`.
+- `logout` no pasa por Passport (no hay nada que "autenticar" para cerrar sesión): simplemente borra la cookie con `res.clearCookie(...)`.
+- El sistema queda preparado para agregar proveedores externos (por ejemplo `passport-google-oauth20` o `passport-github2`) sin tocar `app.js` ni las rutas existentes: alcanzaría con registrar una nueva estrategia más (`passport.use('google', new GoogleStrategy(...))`) en este mismo archivo `passport.config.js`, y agregar sus rutas correspondientes — el resto de la arquitectura (controllers finos que llaman a `passport.authenticate`, `app.js` desentendido del detalle) no necesita cambios.
 
 ### `GET /api/health`
 

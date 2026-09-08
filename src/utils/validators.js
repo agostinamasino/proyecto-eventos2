@@ -108,6 +108,22 @@ export const validateEventStatus = (status) => {
 /** Escapa caracteres especiales de regex antes de usar un input de usuario en un filtro $regex de Mongo. */
 export const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/**
+ * Estados válidos de un ticket/inscripción. Misma idea que EVENT_STATUSES:
+ * única fuente de verdad, importada por `models/Ticket.js` para el enum
+ * del schema.
+ */
+export const TICKET_STATUSES = ['confirmed', 'pending', 'cancelled'];
+
+/** Valida `quantity`: tiene que ser un entero mayor a 0. */
+export const validateQuantity = (quantity) => {
+  const numericQuantity = Number(quantity);
+  if (!Number.isInteger(numericQuantity) || numericQuantity <= 0) {
+    return { valid: false, message: 'quantity debe ser un número entero mayor a 0' };
+  }
+  return { valid: true };
+};
+
 export default {
   validateRegisterFields,
   normalizeEmail,
@@ -115,5 +131,7 @@ export default {
   validateEventFields,
   validateEventStatus,
   escapeRegex,
+  TICKET_STATUSES,
+  validateQuantity,
   MIN_PASSWORD_LENGTH,
 };

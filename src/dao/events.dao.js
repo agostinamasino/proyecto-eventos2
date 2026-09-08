@@ -9,17 +9,28 @@ const ensureConnected = () => {
 };
 
 /**
- * DAO de eventos: es la única capa que conoce el modelo de Mongoose.
- * `getAll` mantiene el comportamiento defensivo original (devuelve []
- * si todavía no hay conexión) porque es una ruta pública de solo lectura;
- * las operaciones de escritura sí exigen conexión activa (ensureConnected)
- * ya que no tiene sentido "simular éxito" al crear/modificar/borrar.
+ * DAO de eventos: única capa que conoce el modelo de Mongoose.
+ * `findAll`/`count` son de solo lectura y devuelven un resultado vacío
+ * si todavía no hay conexión (para que el listado público siga
+ * respondiendo aunque la base esté caída); las operaciones de escritura
+ * sí exigen conexión activa.
+ *
+ * A propósito NO existe un `deleteById`: los eventos nunca se borran
+ * físicamente, "cancelar" es cambiar `status` a `cancelled` (ver
+ * `services/events.service.js`).
  */
-export const getAll = async () => {
+export const findAll = async ({ filter = {}, skip = 0, limit = 10, sort = { date: 1 } } = {}) => {
   if (mongoose.connection.readyState !== 1) {
     return [];
   }
-  return Event.find().lean();
+  return Event.find(filter).sort(sort).skip(skip).limit(limit).lean();
+};
+
+export const count = async (filter = {}) => {
+  if (mongoose.connection.readyState !== 1) {
+    return 0;
+  }
+  return Event.countDocuments(filter);
 };
 
 export const findById = async (id) => {
@@ -37,9 +48,4 @@ export const updateById = async (id, updates) => {
   return Event.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
 };
 
-export const deleteById = async (id) => {
-  ensureConnected();
-  return Event.findByIdAndDelete(id);
-};
-
-export default { getAll, findById, create, updateById, deleteById };
+export default { findAll, count, findById, create, updateById };

@@ -1,6 +1,7 @@
 import usersRepository from '../repositories/users.repository.js';
-import { hashPassword } from '../utils/hash.js';
+import { hashPassword, comparePassword } from '../utils/hash.js';
 import { validateRegisterFields, normalizeEmail } from '../utils/validators.js';
+import { signToken } from '../utils/jwt.js';
 import ApiError from '../utils/apiError.js';
 
 /**
@@ -49,4 +50,31 @@ export const registerUser = async ({ first_name, last_name, email, password }) =
   return toPublicUser(newUser);
 };
 
-export default { registerUser };
+/**
+ * Login: busca el usuario por email y compara el password con bcrypt.
+ * Ante CUALQUIER problema (email inexistente, password incorrecto, o
+ * campos faltantes) responde con el mismo error genérico "Credenciales
+ * inválidas" — nunca se distingue cuál de las dos cosas falló, para no
+ * darle pistas a quien intenta adivinar contraseñas.
+ * Si todo coincide, devuelve un JWT firmado con { id, email, role }.
+ */
+export const loginUser = async ({ email, password }) => {
+  if (!email || !password) {
+    throw new ApiError(401, 'Credenciales inválidas');
+  }
+
+  const normalizedEmail = normalizeEmail(email);
+  const user = await usersRepository.findByEmail(normalizedEmail);
+  if (!user) {
+    throw new ApiError(401, 'Credenciales inválidas');
+  }
+
+  const passwordMatches = await comparePassword(password, user.password);
+  if (!passwordMatches) {
+    throw new ApiError(401, 'Credenciales inválidas');
+  }
+
+  return signToken({ id: user._id, email: user.email, role: user.role });
+};
+
+export default { registerUser, loginUser };

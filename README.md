@@ -8,7 +8,8 @@ Backend II (Coderhouse) — API REST con Express organizada por capas, para una 
 - **Pre-entrega 4:** refactor de la autenticación para que pase por estrategias de **Passport.js** (`register`, `login`, `current`), centralizadas en `src/config/passport.config.js`. El contrato externo de la API (rutas, requests, responses) no cambia respecto de la pre-entrega 3 — solo mejora la organización interna.
 - **Pre-entrega 5:** sistema de autorización por roles. Middleware `authorize` reutilizable que protege rutas según el rol de `req.user` (403 si no coincide), matriz de permisos para `user`/`organizer`/`admin`, alta/modificación de eventos con validación de propiedad (`organizer` solo sobre los suyos, `admin` sobre cualquiera) y una ruta administrativa (`GET /api/users`) solo para `admin`.
 - **Pre-entrega 6:** entidad `Event` completa y lógica de negocio de eventos. Modelo ampliado (`category`, `price`, `status`), CRUD completo (`POST`, `GET` listado con filtros/paginación/orden, `GET` por id, `PUT` modificar, `PATCH .../status` cambiar estado), y reglas de negocio en la capa `services` (no fecha pasada, `capacity`/`price` válidos, no modificar eventos cancelados, no publicar eventos finalizados/cancelados). Los eventos nunca se borran físicamente: "cancelar" es un cambio de estado.
-- **Pre-entrega 7 (actual):** entidad `Ticket` e inscripciones a eventos. Un usuario autenticado puede inscribirse a un evento `published` (`POST /api/events/:eid/tickets`), consultar sus propias inscripciones (`GET /api/tickets/my-tickets`), cancelarlas (`PATCH /api/tickets/:tid/cancel`), y el organizer dueño del evento (o admin) puede ver quién se inscribió (`GET /api/events/:eid/tickets`). Control de cupos (los tickets `cancelled` no ocupan lugar), regla de una inscripción activa por usuario/evento, y email de confirmación con **Nodemailer** al inscribirse. Los tickets tampoco se borran físicamente: cancelar es un cambio de estado.
+- **Pre-entrega 7:** entidad `Ticket` e inscripciones a eventos. Un usuario autenticado puede inscribirse a un evento `published` (`POST /api/events/:eid/tickets`), consultar sus propias inscripciones (`GET /api/tickets/my-tickets`), cancelarlas (`PATCH /api/tickets/:tid/cancel`), y el organizer dueño del evento (o admin) puede ver quién se inscribió (`GET /api/events/:eid/tickets`). Control de cupos (los tickets `cancelled` no ocupan lugar), regla de una inscripción activa por usuario/evento, y email de confirmación con **Nodemailer** al inscribirse. Los tickets tampoco se borran físicamente: cancelar es un cambio de estado.
+- **Pre-entrega 8 (actual):** refactor a una **arquitectura en capas formal**, con una capa **DTO** explícita además de DAO/Repository/Service/Controller. No cambia ninguna ruta, request ni response de las pre-entregas anteriores — es un refactor interno. Ver la sección **"Arquitectura en capas"** más abajo para el detalle completo de qué hace cada capa y qué cambió.
 
 ## Temática elegida
 
@@ -155,25 +156,29 @@ proyecto-eventos/
 │   │   └── tickets.router.js        # GET /my-tickets, PATCH /:tid/cancel (ambas con `auth`)
 │   ├── controllers/
 │   │   ├── health.controller.js
-│   │   ├── events.controller.js     # listEvents, getEvent, createEvent, updateEvent, changeEventStatus
-│   │   ├── sessions.controller.js   # dispara las estrategias de Passport y traduce el resultado a respuesta HTTP + cookie
-│   │   ├── users.controller.js      # listUsers (ruta administrativa)
-│   │   └── tickets.controller.js    # createTicket, getMyTickets, getEventTickets, cancelTicket
+│   │   ├── events.controller.js     # listEvents, getEvent, createEvent, updateEvent, changeEventStatus — mapea a DTO con dto/event.dto.js
+│   │   ├── sessions.controller.js   # dispara las estrategias de Passport y traduce el resultado a respuesta HTTP + cookie — mapea a DTO con dto/user.dto.js
+│   │   ├── users.controller.js      # listUsers (ruta administrativa) — mapea a DTO con dto/user.dto.js
+│   │   └── tickets.controller.js    # createTicket, getMyTickets, getEventTickets, cancelTicket — mapea a DTO con dto/ticket.dto.js
 │   ├── services/
 │   │   ├── events.service.js        # reglas de negocio de eventos (fechas, estados, capacity/price), filtros/paginación y validación de propiedad (organizer/admin)
 │   │   ├── tickets.service.js       # reglas de negocio de inscripciones: cupos, duplicados, cancelación, y dispara el email de confirmación
 │   │   ├── users.service.js         # getAllUsers, para la ruta administrativa
 │   │   └── sessions.service.js      # deprecado desde la pre-entrega 4 (ver más abajo); se deja vacío para conservar la estructura
 │   ├── repositories/
-│   │   ├── events.repository.js
-│   │   ├── tickets.repository.js
+│   │   ├── events.repository.js     # searchEvents, countEvents, findEventById, createEvent, updateEvent, touchForCapacityLock
+│   │   ├── tickets.repository.js    # createTicket, findTicketById, findActiveTicketByUserAndEvent, getOccupiedCapacity, findTicketsByUser, findTicketsByEvent, cancelTicket
 │   │   ├── sessions.repository.js   # placeholder, sin lógica propia por ahora
-│   │   └── users.repository.js      # findByEmail / create / findAll
+│   │   └── users.repository.js      # findByEmail, createUser, findAllUsers
 │   ├── dao/
-│   │   ├── events.dao.js            # única capa que consulta el modelo Event con Mongoose (findAll con filtro/skip/limit/sort, count, findById, create, updateById — sin deleteById a propósito)
-│   │   ├── tickets.dao.js           # única capa que consulta el modelo Ticket (create, findById, findActiveByUserAndEvent, sumActiveQuantityByEvent, findByUser, findByEvent, updateById — sin deleteById)
+│   │   ├── events.dao.js            # única capa que importa el modelo Event de Mongoose (findAll con filtro/skip/limit/sort, count, findById, create, updateById, touchForCapacityLock — sin deleteById a propósito)
+│   │   ├── tickets.dao.js           # única capa que importa el modelo Ticket de Mongoose (create, findById, findActiveByUserAndEvent, sumActiveQuantityByEvent, findByUser, findByEvent, updateById — sin deleteById)
 │   │   ├── sessions.dao.js          # placeholder, sin lógica propia por ahora
-│   │   └── users.dao.js             # única capa que consulta el modelo User con Mongoose
+│   │   └── users.dao.js             # única capa que importa el modelo User de Mongoose
+│   ├── dto/
+│   │   ├── event.dto.js             # toPublicEvent (respuesta completa de un evento), toEventSummary (resumen embebido en un ticket)
+│   │   ├── ticket.dto.js            # toPublicTicket (respuesta completa de un ticket), toMyTicket (ticket + evento resumido, para "mis tickets")
+│   │   └── user.dto.js              # toPublicUser (registro), toCurrentUser (/current), toAdminUserSummary (listado administrativo) — ninguno expone `password`
 │   ├── models/
 │   │   ├── User.js                  # first_name, last_name, email, password, role (enum: user/organizer/admin, default user)
 │   │   ├── Event.js                 # title, description, category, date, location, capacity, price, status (enum), organizer (ref User)
@@ -198,7 +203,7 @@ proyecto-eventos/
 └── README.md
 ```
 
-La API sigue una arquitectura por capas: **rutas → controladores → servicios → repositorios → DAO → modelos**. Cada capa solo se comunica con la inmediatamente inferior. `app.js` y las rutas no tienen lógica de negocio.
+La API sigue una arquitectura por capas: **rutas → controladores → servicios → repositorios → DAO → modelos**, con una capa **DTO** transversal que los controllers usan para dar forma a la respuesta final. Cada capa solo se comunica con la inmediatamente inferior. `app.js` y las rutas no tienen lógica de negocio. Ver la sección **"Arquitectura en capas"**, justo después de esta, para el detalle de qué hace cada capa, qué puede importar y qué no, y por qué existe un DTO separado del modelo.
 
 Desde la pre-entrega 4, la autenticación pasa por **Passport.js**: toda la lógica de validación, hash de contraseña, unicidad de email y verificación de credenciales vive dentro de las estrategias definidas en `config/passport.config.js`, no en `services/sessions.service.js` (que queda vacío/deprecado, conservado solo para no romper la estructura de carpetas). Los controllers de `sessions.controller.js` disparan esas estrategias con `passport.authenticate(...)` y se limitan a traducir el resultado a una respuesta HTTP — y, en el caso de `login`, a generar el JWT y setear la cookie una vez que Passport confirmó que las credenciales son válidas. Ver la sección **"Autenticación con Passport.js"** más abajo para el detalle de cada estrategia.
 
@@ -207,6 +212,56 @@ Desde la pre-entrega 5, además de autenticar (saber *quién* es el usuario) la 
 Desde la pre-entrega 6, `Event` es la entidad central del dominio: el modelo se amplió (`category`, `price`, `status`) y todas las reglas de negocio (fechas, estados válidos, `capacity`/`price`, propiedad del recurso) viven en `services/events.service.js` — nunca en las rutas ni en los controllers, que solo traducen entre HTTP y las llamadas al service. Los eventos **nunca se borran físicamente**: `dao/events.dao.js` ni siquiera expone un `deleteById`; "cancelar" es cambiar `status` a `cancelled` a través de `PATCH /api/events/:id/status`. Ver la sección **"Eventos"** más abajo para el detalle completo del modelo, las reglas de negocio y los filtros de listado.
 
 Desde la pre-entrega 7, `Ticket` relaciona usuarios con eventos (inscripciones), siguiendo la misma filosofía: solo referencias (`user`, `event` son ObjectId, nunca el objeto embebido), reglas de negocio en `services/tickets.service.js` (cupos, duplicados, estados válidos), y sin borrado físico — cancelar es `status: 'cancelled'` + `cancelledAt`. El email de confirmación (Nodemailer) se dispara desde el service después de crear el ticket, como una notificación "best effort": si falla el envío, no revierte la inscripción, que ya quedó confirmada en la base. Ver la sección **"Tickets e inscripciones"** más abajo para el detalle completo.
+
+Desde la pre-entrega 8, la arquitectura por capas se formaliza: el Repository dejó de exponer métodos CRUD genéricos con nombres calcados del DAO (`findAll`, `create`, `updateById`) y ahora expone métodos orientados al dominio (`searchEvents`, `createTicket`, `cancelTicket`, etc.), y se agregó una capa **DTO** explícita que es la única responsable de decidir qué campos salen en cada respuesta — en particular, que `password` nunca salga, ni siquiera hasheado. Es un refactor puramente interno: ninguna ruta, request ni response cambió respecto de la pre-entrega 7. Ver la sección **"Arquitectura en capas"** para el detalle completo.
+
+## Arquitectura en capas
+
+Esta sección describe, capa por capa, quién puede importar a quién y de qué es responsable cada una. La regla general es que **cada capa solo conoce a la inmediatamente inferior**: un controller no sabe que Mongoose existe, un service no sabe que MongoDB existe, y ninguna de las dos importa un modelo directamente.
+
+```
+routers → controllers → services → repositories → dao → models
+                ↓
+               dto  (los controllers dan forma a la respuesta con esto)
+```
+
+### DAO (`src/dao/`)
+
+Es la **única** capa que importa modelos de Mongoose (`import User from '../models/User.js'`, etc.). Expone operaciones genéricas de persistencia, sin nombres de negocio: `findById`, `findOne`, `create`, `findAll`, `count`, `updateById` (y, en el caso de `tickets.dao.js`/`events.dao.js`, un par de agregaciones/updates puntuales que sí necesitan conocer el shape de Mongo, como `sumActiveQuantityByEvent` o `touchForCapacityLock`). No valida reglas de negocio ni decide qué campos exponer — solo sabe hablar con la base. Ningún archivo fuera de `dao/` importa un modelo.
+
+### Repository (`src/repositories/`)
+
+Usa el DAO correspondiente (nunca un modelo directamente) y traduce sus operaciones genéricas a **métodos orientados al dominio**, que es el vocabulario que el service realmente necesita:
+
+- `users.repository.js`: `findByEmail`, `createUser`, `findAllUsers`.
+- `events.repository.js`: `searchEvents`, `countEvents`, `findEventById`, `createEvent`, `updateEvent`, `touchForCapacityLock`.
+- `tickets.repository.js`: `createTicket`, `findTicketById`, `findActiveTicketByUserAndEvent`, `getOccupiedCapacity`, `findTicketsByUser`, `findTicketsByEvent`, `cancelTicket`.
+
+Ninguno expone ya un `updateById`/`create` genérico calcado del DAO: por ejemplo, cancelar un ticket no es "actualizar un campo cualquiera", es `cancelTicket(ticketId)` — el repository sabe que "cancelar" significa `{ status: 'cancelled', cancelledAt: new Date() }`, así el service no tiene que construir ese objeto a mano ni acoplarse a los nombres de campos del modelo.
+
+> **Nota sobre nombres:** la consigna sugería `countActiveTickets` como ejemplo de método del repository de tickets. Se eligió `getOccupiedCapacity` en su lugar porque es más preciso: no cuenta *documentos* de tickets, sino que suma su campo `quantity` (un ticket puede reservar más de un lugar) — es el "cupo ocupado" de un evento, no la "cantidad de tickets". Se priorizó que el nombre describa exactamente lo que el método hace por sobre repetir literalmente el nombre de ejemplo de la consigna.
+
+### Service (`src/services/`)
+
+Consume **solo repositories**, nunca DAOs ni modelos directamente. Acá vive **toda** la lógica de negocio: cálculo y control de cupos, transiciones de estado válidas/inválidas de `Event` y `Ticket`, detección de duplicados (inscripción repetida, email repetido), y las reglas de permisos que dependen de un recurso puntual (por ejemplo, que un `organizer` solo pueda modificar *sus propios* eventos — eso no lo puede resolver un middleware genérico porque necesita ir a buscar el dueño del recurso). También es la capa que dispara efectos secundarios como el email de confirmación (`utils/mailer.js`). Los services lanzan `ApiError(status, message)` para cualquier error de negocio; nunca devuelven un objeto de respuesta HTTP armado ni saben nada de `req`/`res`.
+
+### Controller (`src/controllers/`)
+
+Solo coordina request/response: lee `req.params`/`req.body`/`req.user`, llama al service correspondiente, y traduce el resultado a una respuesta HTTP — mapeando el/los documento(s) que devuelve el service a través del DTO correspondiente antes de responder. No calcula cupos, no valida estados, no decide reglas de negocio y no importa ningún modelo de Mongoose. Los errores que el service lanza (`ApiError`) se pasan con `next(error)` al middleware de errores central; el controller no decide códigos de estado más allá de los casos felices (200/201).
+
+### DTO (`src/dto/`)
+
+Cada mapper toma un documento (de Mongoose o un objeto plano) y devuelve **solo** los campos que la respuesta debe exponer. Ningún DTO incluye `password`, ni siquiera hasheado:
+
+- `dto/user.dto.js`: `toPublicUser` (respuesta de `POST /api/sessions/register`: id, first_name, last_name, email, role), `toCurrentUser` (respuesta de `GET /api/sessions/current`: id, email, role, tal como viaja en el JWT), `toAdminUserSummary` (respuesta de `GET /api/users`: agrega `createdAt` sobre `toPublicUser`).
+- `dto/event.dto.js`: `toPublicEvent` (respuesta completa de un evento) y `toEventSummary` (versión resumida — solo id/title/date/location — para cuando un evento aparece *embebido* dentro de otra respuesta).
+- `dto/ticket.dto.js`: `toPublicTicket` (respuesta completa de un ticket, con `event` como el ObjectId sin poblar) y `toMyTicket` (la respuesta de `GET /api/tickets/my-tickets`, donde el repository sí popula el evento: en vez de exponer el documento de Mongoose completo del evento poblado —que traería todos sus campos—, `toMyTicket` lo pasa por `toEventSummary` antes de incluirlo. Así, si algún día un evento populado trajera un campo sensible, seguiría filtrado por el DTO del evento).
+
+Esta es la razón por la que existe una capa DTO separada del modelo: cuando una respuesta usa `populate` (como `findTicketsByUser`, que popula `event`), no alcanza con filtrar los campos del documento principal — hay que filtrar también los del documento relacionado, y por eso `toMyTicket` compone el DTO del ticket con el DTO (resumido) del evento, en vez de serializar el documento poblado tal cual.
+
+### Manejo de errores
+
+Los services son los únicos que deciden el código HTTP de un error de negocio, lanzando `new ApiError(status, message)` (`utils/apiError.js`) con el status que corresponda: **400** (datos inválidos: campos faltantes, fecha pasada, `quantity`/`capacity`/`price` inválidos), **404** (el recurso no existe, o el id tiene un formato inválido), **409** (conflicto de estado o de negocio: evento cancelado/finalizado, ticket ya cancelado, inscripción duplicada, email duplicado, sin cupo). Los middlewares `auth`/`authorize` cortan antes de llegar al service con **401** (no autenticado) o **403** (autenticado pero sin permiso). Todos estos errores —los que lanza un service y los que devuelven los middlewares— terminan en el mismo formato de respuesta (`{ status: 'error', message }`) a través de `next(error)` y el middleware central `middlewares/errorHandler.js`, que es el único lugar de todo el proyecto que responde con **500**: solo cuando el error que llega no tiene un `.status` propio (una falla realmente inesperada, no un caso de negocio contemplado). Ver **"401 vs. 403 — la diferencia"** más abajo para el detalle de esos dos casos puntuales.
 
 ## Rutas disponibles
 
@@ -861,6 +916,16 @@ Para estos casos hace falta un evento en estado `published` con `capacity` chica
 2. **Registro con emails en carrera**: mandar, casi al mismo tiempo (por ejemplo, dos `Invoke-RestMethod` sin esperar la respuesta del primero, o `Start-Job`), dos `POST /api/sessions/register` con el mismo email → uno de los dos tiene que dar 201 y el otro 409 `"El email ya está registrado"` — nunca un 500.
 3. **Cupos con inscripciones en carrera**: con un evento `published` de `capacity: 1`, mandar dos `POST /api/events/:eid/tickets` casi simultáneos de dos usuarios distintos → solo uno de los dos tiene que dar 201; el otro, 409 `"No hay cupos suficientes: quedan 0 disponibles"` (nunca los dos con 201, que sería vender de más el cupo).
 
+### Las 5 pruebas de la arquitectura en capas (pre-entrega 8)
+
+Estas cinco son las que pide explícitamente esta entrega. Ninguna requiere datos nuevos: reusan las mismas rutas de siempre, porque el refactor no cambió el comportamiento externo.
+
+1. **Flujo completo**: `POST /api/sessions/register` → `POST /api/sessions/login` → `POST /api/events` (como `organizer`) → `PATCH /api/events/:id/status` para publicarlo → `POST /api/events/:eid/tickets` (inscribirse) → `GET /api/tickets/my-tickets` → `PATCH /api/tickets/:tid/cancel`. Cada paso tiene que dar el código y el payload documentados en su sección correspondiente más arriba.
+2. **`GET /api/sessions/current` sin `password`**: la respuesta (`payload`) tiene que tener exactamente `id`, `email`, `role` — nunca un campo `password`, ni siquiera hasheado. Lo garantiza `dto/user.dto.js` (`toCurrentUser`).
+3. **Ticket con `populate` sin `password`**: `GET /api/tickets/my-tickets` popula el `event` de cada ticket (`ticketsDao.findByUser` usa `.populate('event', 'title date location')`), pero el punto de esta prueba es que **ningún** dato sensible se filtre a través de esa relación poblada — se verifica inspeccionando el JSON completo de la respuesta y confirmando que no aparece `password` en ningún nivel (ni en el ticket, ni en el evento embebido). Lo garantiza que `toMyTicket` (`dto/ticket.dto.js`) pase el evento poblado por `toEventSummary` en vez de serializarlo tal cual.
+4. **Endpoint de error de negocio nunca da 500**: por ejemplo, inscribirse dos veces al mismo evento (`POST /api/events/:eid/tickets` repetido) tiene que dar 409, no 500; lo mismo con cualquiera de los casos 400/404/409 ya documentados en cada sección. El `errorHandler` central solo cae en 500 ante un error realmente inesperado, no ante un caso de negocio contemplado.
+5. **401 vs. 403 en una ruta protegida**: pedir un endpoint protegido sin cookie (por ejemplo, `GET /api/tickets/my-tickets`) → 401; con una cookie válida pero de un rol sin permiso (por ejemplo, `POST /api/events` logueado como `user`) → 403.
+
 ## Correcciones aplicadas
 
 Después de entregada la pre-entrega 7, la devolución de la cátedra marcó tres ajustes puntuales sobre entregas ya corregidas (pre-entrega 2, pre-entrega 5 y pre-entrega 7). Se implementaron los tres sobre `main`, sin volver a tocar los commits/tags ya entregados de esas pre-entregas (esos tags siguen representando el estado exacto que se corrigió en su momento).
@@ -879,6 +944,14 @@ Después de entregada la pre-entrega 7, la devolución de la cátedra marcó tre
    Probando esto también se encontró que el envío del email de confirmación (`utils/mailer.js`) no tenía ningún timeout explícito: como se espera (`await`) antes de responderle al cliente, un SMTP lento o caído podía dejar la inscripción entera colgada esperando esa respuesta (los timeouts por defecto de Nodemailer llegan hasta 10 minutos). Se le agregaron `connectionTimeout`/`greetingTimeout`/`socketTimeout` de 10 segundos al transporter, así "best effort" se cumple también en el peor caso: si el email no sale, desiste rápido y responde igual.
 
    Una tercera cosa que salió a la luz recién al forzar la carrera con dos jobs reales de PowerShell: `tickets.dao.js` le pasaba la `session` a `Ticket.create(ticketData, { session })` con `ticketData` como un objeto suelto — Mongoose solo reconoce las opciones (incluida `session`) como segundo argumento cuando el primero es un **array** de documentos; con un solo objeto, termina interpretando mal los argumentos y la creación del ticket fallaba con un error de validación ("todos los campos son requeridos"). Se corrigió envolviendo siempre `ticketData` en un array (`Ticket.create([ticketData], { session })`), que es la forma que Mongoose sí soporta.
+
+## Refactor a arquitectura en capas (pre-entrega 8)
+
+La estructura de capas (rutas → controllers → services → repositories → dao → modelos) ya existía desde la pre-entrega 1. Esta entrega la formaliza con dos cambios puntuales, sin tocar ninguna ruta, request ni response existente — ver la sección **"Arquitectura en capas"**, cerca del principio de este README, para la explicación completa de qué hace cada capa hoy.
+
+**1. Capa DTO explícita.** Antes, cada controller armaba su propia respuesta a mano (por ejemplo, `sessions.controller.js` tenía su propia función `toPublicUser` inline, y `users.service.js` tenía **otra** función con el mismo nombre pero campos distintos — dos mapeos separados, fáciles de desincronizar). Ahora existe `src/dto/`, con un mapper por entidad (`event.dto.js`, `ticket.dto.js`, `user.dto.js`) que es la única fuente de verdad de qué campos salen en cada respuesta. Esto no cambió ningún payload existente — los DTO se escribieron para reproducir exactamente los campos que cada endpoint ya devolvía — pero centraliza esa decisión en un solo lugar por entidad, y deja explícito, en el mismo archivo, que `password` nunca es uno de esos campos.
+
+**2. Repository con nombres de dominio.** Antes, el repository era básicamente un pass-through del DAO con los mismos nombres genéricos (`eventsRepository.findAll`, `.count`, `.findById`, `.create`, `.updateById`; igual en `tickets.repository.js` y `users.repository.js`), lo que borraba la diferencia entre "la capa que sabe hablar con Mongo" (DAO) y "la capa que expone operaciones de negocio" (Repository) — ambas terminaban exponiendo lo mismo. Ahora cada repository tiene su propio vocabulario (`searchEvents`, `createTicket`, `cancelTicket`, `findByEmail`, etc., ver el detalle completo en "Arquitectura en capas") y ya no exporta ningún método CRUD genérico. Esto obligó a actualizar todos los call sites (`events.service.js`, `tickets.service.js`, `users.service.js`, `config/passport.config.js`) para llamar a los nuevos nombres — un cambio mecánico, ya que la lógica de negocio en sí (qué se valida, en qué orden, qué transacción usa) no se tocó.
 
 ## Próximas entregas
 

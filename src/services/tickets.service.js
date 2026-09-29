@@ -10,7 +10,7 @@ const findEventOrFail = async (eventId) => {
   if (!mongoose.Types.ObjectId.isValid(eventId)) {
     throw new ApiError(404, 'Evento no encontrado');
   }
-  const event = await eventsRepository.findById(eventId);
+  const event = await eventsRepository.findEventById(eventId);
   if (!event) {
     throw new ApiError(404, 'Evento no encontrado');
   }
@@ -21,7 +21,7 @@ const findTicketOrFail = async (ticketId) => {
   if (!mongoose.Types.ObjectId.isValid(ticketId)) {
     throw new ApiError(404, 'Ticket no encontrado');
   }
-  const ticket = await ticketsRepository.findById(ticketId);
+  const ticket = await ticketsRepository.findTicketById(ticketId);
   if (!ticket) {
     throw new ApiError(404, 'Ticket no encontrado');
   }
@@ -105,20 +105,20 @@ export const createTicket = async (eventId, { quantity } = {}, currentUser) => {
       // paralelo sin verse.
       await eventsRepository.touchForCapacityLock(eventId, { session });
 
-      const existingActiveTicket = await ticketsRepository.findActiveByUserAndEvent(currentUser.id, eventId, {
+      const existingActiveTicket = await ticketsRepository.findActiveTicketByUserAndEvent(currentUser.id, eventId, {
         session,
       });
       if (existingActiveTicket) {
         throw new ApiError(409, 'Ya tenés una inscripción activa para este evento');
       }
 
-      const occupied = await ticketsRepository.sumActiveQuantityByEvent(eventId, { session });
+      const occupied = await ticketsRepository.getOccupiedCapacity(eventId, { session });
       const available = event.capacity - occupied;
       if (available < requestedQuantity) {
         throw new ApiError(409, `No hay cupos suficientes: quedan ${Math.max(available, 0)} disponibles`);
       }
 
-      ticket = await ticketsRepository.create(
+      ticket = await ticketsRepository.createTicket(
         {
           user: currentUser.id,
           event: eventId,
@@ -160,7 +160,7 @@ export const createTicket = async (eventId, { quantity } = {}, currentUser) => {
 
 /** Tickets del usuario autenticado, con el evento poblado (title/date/location). */
 export const getMyTickets = async (currentUser) => {
-  return ticketsRepository.findByUser(currentUser.id);
+  return ticketsRepository.findTicketsByUser(currentUser.id);
 };
 
 /**
@@ -175,7 +175,7 @@ export const getEventTickets = async (eventId, currentUser) => {
     throw new ApiError(403, 'Solo podés ver las inscripciones de tus propios eventos');
   }
 
-  return ticketsRepository.findByEvent(eventId);
+  return ticketsRepository.findTicketsByEvent(eventId);
 };
 
 /**
@@ -196,7 +196,7 @@ export const cancelTicket = async (ticketId, currentUser) => {
     throw new ApiError(409, 'Esta inscripción ya está cancelada');
   }
 
-  return ticketsRepository.updateById(ticketId, { status: 'cancelled', cancelledAt: new Date() });
+  return ticketsRepository.cancelTicket(ticketId);
 };
 
 export default { createTicket, getMyTickets, getEventTickets, cancelTicket };

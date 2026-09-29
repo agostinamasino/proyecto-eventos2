@@ -18,7 +18,7 @@ const cookieExtractor = (req) => req?.cookies?.currentUser || null;
  * Toda la lógica que antes vivía en sessions.service.js (validación de
  * campos, formato de email, longitud de password, normalización,
  * unicidad de email y hash con bcrypt) queda centralizada acá. El
- * `role` nunca se lee del body: usersRepository.create() recibe un
+ * `role` nunca se lee del body: usersRepository.createUser() recibe un
  * objeto armado a mano sin ese campo, así que el modelo siempre aplica
  * su default ('user').
  *
@@ -48,7 +48,7 @@ passport.use(
 
         const hashedPassword = await hashPassword(password);
 
-        const newUser = await usersRepository.create({
+        const newUser = await usersRepository.createUser({
           first_name: String(first_name).trim(),
           last_name: String(last_name).trim(),
           email: normalizedEmail,
@@ -58,7 +58,7 @@ passport.use(
         return done(null, newUser);
       } catch (error) {
         // Condición de carrera: el chequeo de `findByEmail` de arriba y el
-        // `usersRepository.create()` no son atómicos entre sí, así que si
+        // `usersRepository.createUser()` no son atómicos entre sí, así que si
         // dos registros con el mismo email llegan casi juntos, los dos
         // pueden pasar el chequeo "no existe" y ambos intentan crear el
         // usuario. El índice `unique` de Mongo sobre `email` (ver

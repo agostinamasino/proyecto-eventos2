@@ -5,7 +5,7 @@ import usersRepository from '../repositories/users.repository.js';
 // controllers/users.controller.js. Este service solo devuelve los
 // documentos tal como los trae el repository.
 export const getAllUsers = async () => {
-  return usersRepository.findAll();
+  return usersRepository.findAllUsers();
 };
 
 export default { getAllUsers };

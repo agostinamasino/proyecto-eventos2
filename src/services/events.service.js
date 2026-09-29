@@ -71,8 +71,8 @@ export const getAllEvents = async (query = {}) => {
   const sortObj = buildSort(sort);
 
   const [data, total] = await Promise.all([
-    eventsRepository.findAll({ filter, skip, limit: parsedLimit, sort: sortObj }),
-    eventsRepository.count(filter),
+    eventsRepository.searchEvents({ filter, skip, limit: parsedLimit, sort: sortObj }),
+    eventsRepository.countEvents(filter),
   ]);
 
   return {
@@ -93,7 +93,7 @@ const findEventOrFail = async (eventId) => {
     throw new ApiError(404, 'Evento no encontrado');
   }
 
-  const event = await eventsRepository.findById(eventId);
+  const event = await eventsRepository.findEventById(eventId);
 
   if (!event) {
     throw new ApiError(404, 'Evento no encontrado');
@@ -132,7 +132,7 @@ export const createEvent = async ({ title, description, category, date, location
     throw new ApiError(400, validation.message);
   }
 
-  return eventsRepository.create({
+  return eventsRepository.createEvent({
     title: String(title).trim(),
     description: String(description).trim(),
     category: String(category).trim(),
@@ -173,7 +173,7 @@ export const updateEvent = async (eventId, updates, currentUser) => {
   if (capacity !== undefined) allowedUpdates.capacity = capacity;
   if (price !== undefined) allowedUpdates.price = price;
 
-  return eventsRepository.updateById(eventId, allowedUpdates);
+  return eventsRepository.updateEvent(eventId, allowedUpdates);
 };
 
 /**
@@ -200,7 +200,7 @@ export const changeEventStatus = async (eventId, newStatus, currentUser) => {
     throw new ApiError(409, 'No se puede publicar un evento ya finalizado');
   }
 
-  return eventsRepository.updateById(eventId, { status: newStatus });
+  return eventsRepository.updateEvent(eventId, { status: newStatus });
 };
 
 export default { getAllEvents, getEventById, createEvent, updateEvent, changeEventStatus };

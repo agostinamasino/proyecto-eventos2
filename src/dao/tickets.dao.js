@@ -8,10 +8,27 @@ const ensureConnected = () => {
   }
 };
 
-/** DAO de tickets: única capa que conoce el modelo de Mongoose. Sin `deleteById` — cancelar es un cambio de estado, nunca un borrado. */
-export const create = async (ticketData) => {
+/**
+ * DAO de tickets: única capa que conoce el modelo de Mongoose. Sin
+ * `deleteById` — cancelar es un cambio de estado, nunca un borrado.
+ *
+ * `create`, `findActiveByUserAndEvent` y `sumActiveQuantityByEvent` acá
+ * abajo aceptan un segundo parámetro `{ session }` opcional: es lo que le
+ * permite a `services/tickets.service.js` correrlas dentro de una misma
+ * transacción de Mongo (para blindar la condición de carrera del cupo —
+ * ver el comentario en `createTicket`). Cuando no se pasa `session`, se
+ * comportan exactamente igual que antes (fuera de cualquier transacción).
+ */
+export const create = async (ticketData, { session } = {}) => {
   ensureConnected();
-  return Ticket.create(ticketData);
+  // Mongoose solo reconoce el segundo argumento como opciones (`{ session }`)
+  // cuando el primero es un ARRAY de documentos — `Ticket.create(unSoloObjeto, { session })`
+  // no está soportado y termina interpretando mal los argumentos (los
+  // campos del ticket no llegan a validarse como corresponde). Por eso
+  // acá siempre se envuelve `ticketData` en un array, aunque sea un solo
+  // documento, y se devuelve el primer (y único) resultado.
+  const [ticket] = await Ticket.create([ticketData], { session });
+  return ticket;
 };
 
 export const findById = async (id) => {
@@ -20,18 +37,18 @@ export const findById = async (id) => {
 };
 
 /** Ticket activo (no cancelado) de un usuario puntual para un evento puntual — para la regla de "no duplicados". */
-export const findActiveByUserAndEvent = async (userId, eventId) => {
+export const findActiveByUserAndEvent = async (userId, eventId, { session } = {}) => {
   ensureConnected();
-  return Ticket.findOne({ user: userId, event: eventId, status: { $ne: 'cancelled' } });
+  return Ticket.findOne({ user: userId, event: eventId, status: { $ne: 'cancelled' } }).session(session || null);
 };
 
 /** Suma de `quantity` de todos los tickets activos (no cancelados) de un evento — es el cupo ya ocupado. */
-export const sumActiveQuantityByEvent = async (eventId) => {
+export const sumActiveQuantityByEvent = async (eventId, { session } = {}) => {
   ensureConnected();
   const result = await Ticket.aggregate([
     { $match: { event: new mongoose.Types.ObjectId(eventId), status: { $ne: 'cancelled' } } },
     { $group: { _id: null, total: { $sum: '$quantity' } } },
-  ]);
+  ]).session(session || null);
   return result[0]?.total || 0;
 };
 

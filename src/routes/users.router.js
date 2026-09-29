@@ -5,7 +5,8 @@ import authorize from '../middlewares/authorize.middleware.js';
 
 const router = Router();
 
-// Ruta administrativa: ver todos los usuarios. Solo admin (403 para el resto).
-router.get('/', auth, authorize(['admin']), listUsers);
+// Ruta administrativa: ver todos los usuarios. Solo admin (403 para el
+// resto) — el rol permitido para "VIEW_USERS" vive en utils/permissions.js.
+router.get('/', auth, authorize('VIEW_USERS'), listUsers);
 
 export default router;

@@ -48,4 +48,17 @@ export const updateById = async (id, updates) => {
   return Event.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
 };
 
-export default { findAll, count, findById, create, updateById };
+/**
+ * "Toca" el documento del evento (solo actualiza `updatedAt`, ningún dato
+ * visible cambia) dentro de una transacción. No tiene otro propósito que
+ * forzar un punto de choque real entre dos transacciones concurrentes que
+ * estén creando tickets para el MISMO evento: ver el comentario en
+ * `services/tickets.service.js` (`createTicket`) para por qué hace falta
+ * esto además de la transacción en sí.
+ */
+export const touchForCapacityLock = async (id, { session } = {}) => {
+  ensureConnected();
+  return Event.updateOne({ _id: id }, { $set: { updatedAt: new Date() } }, { session });
+};
+
+export default { findAll, count, findById, create, updateById, touchForCapacityLock };

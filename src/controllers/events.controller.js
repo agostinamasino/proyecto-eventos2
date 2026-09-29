@@ -44,7 +44,7 @@ export const getEvent = async (req, res, next) => {
 };
 
 /**
- * POST /api/events — la ruta ya exigió `auth` + `authorize(['organizer','admin'])`.
+ * POST /api/events — la ruta ya exigió `auth` + `authorize('MANAGE_EVENTS')`.
  * El evento queda asociado al usuario que lo crea (`organizer`).
  */
 export const createEvent = async (req, res, next) => {

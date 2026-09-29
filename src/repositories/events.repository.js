@@ -20,4 +20,8 @@ export const updateById = async (id, updates) => {
   return eventsDao.updateById(id, updates);
 };
 
-export default { findAll, count, findById, create, updateById };
+export const touchForCapacityLock = async (id, options) => {
+  return eventsDao.touchForCapacityLock(id, options);
+};
+
+export default { findAll, count, findById, create, updateById, touchForCapacityLock };

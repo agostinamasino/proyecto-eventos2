@@ -57,6 +57,19 @@ passport.use(
 
         return done(null, newUser);
       } catch (error) {
+        // Condición de carrera: el chequeo de `findByEmail` de arriba y el
+        // `usersRepository.create()` no son atómicos entre sí, así que si
+        // dos registros con el mismo email llegan casi juntos, los dos
+        // pueden pasar el chequeo "no existe" y ambos intentan crear el
+        // usuario. El índice `unique` de Mongo sobre `email` (ver
+        // models/User.js) rechaza el segundo insert con un error de clave
+        // duplicada (código 11000) — sin este catch, ese error no tiene
+        // `.status` y el errorHandler central lo traduciría a un 500. Acá
+        // se lo mapea al mismo 409 que el chequeo explícito de arriba, en
+        // vez de dejarlo pasar como error inesperado.
+        if (error?.code === 11000) {
+          return done(null, false, { status: 409, message: 'El email ya está registrado' });
+        }
         return done(error);
       }
     }

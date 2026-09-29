@@ -26,6 +26,17 @@ const getTransporter = () => {
         user: config.mailUser,
         pass: config.mailPass,
       },
+      // Los timeouts por defecto de Nodemailer son generosos (hasta 10
+      // minutos de `socketTimeout`), y esta llamada se espera (`await`)
+      // antes de responderle al cliente. Si el servidor SMTP no
+      // responde (red lenta, Ethereal caído, etc.), sin estos límites la
+      // inscripción entera queda colgada esperando el email en vez de
+      // responder 201 enseguida — justo lo que "best effort" quiere
+      // evitar. Con esto, en el peor caso, tarda ~10s en desistir y
+      // seguir.
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 10000,
     });
   }
 

@@ -1,19 +1,19 @@
 import ticketsDao from '../dao/tickets.dao.js';
 
-export const create = async (ticketData) => {
-  return ticketsDao.create(ticketData);
+export const create = async (ticketData, options) => {
+  return ticketsDao.create(ticketData, options);
 };
 
 export const findById = async (id) => {
   return ticketsDao.findById(id);
 };
 
-export const findActiveByUserAndEvent = async (userId, eventId) => {
-  return ticketsDao.findActiveByUserAndEvent(userId, eventId);
+export const findActiveByUserAndEvent = async (userId, eventId, options) => {
+  return ticketsDao.findActiveByUserAndEvent(userId, eventId, options);
 };
 
-export const sumActiveQuantityByEvent = async (eventId) => {
-  return ticketsDao.sumActiveQuantityByEvent(eventId);
+export const sumActiveQuantityByEvent = async (eventId, options) => {
+  return ticketsDao.sumActiveQuantityByEvent(eventId, options);
 };
 
 export const findByUser = async (userId) => {

@@ -151,7 +151,7 @@ proyecto-eventos/
 │   │   ├── health.router.js         # GET /api/health
 │   │   ├── events.router.js         # GET, GET/:id (públicas); POST, PUT/:id, PATCH/:id/status, POST/:eid/tickets, GET/:eid/tickets
 │   │   ├── sessions.router.js       # register, login, current (protegida con `auth`), logout
-│   │   ├── users.router.js          # GET /api/users, protegida con `auth` + `authorize(['admin'])`
+│   │   ├── users.router.js          # GET /api/users, protegida con `auth` + `authorize('VIEW_USERS')`
 │   │   └── tickets.router.js        # GET /my-tickets, PATCH /:tid/cancel (ambas con `auth`)
 │   ├── controllers/
 │   │   ├── health.controller.js
@@ -182,7 +182,7 @@ proyecto-eventos/
 │   │   ├── errorHandler.js
 │   │   ├── notFoundHandler.js
 │   │   ├── auth.middleware.js       # AUTENTICACIÓN: ejecuta la estrategia 'current' de Passport (JWT desde la cookie), arma req.user o corta con 401
-│   │   └── authorize.middleware.js  # AUTORIZACIÓN: recibe los roles permitidos, compara con req.user.role, corta con 403 si no coincide
+│   │   └── authorize.middleware.js  # AUTORIZACIÓN: recibe el nombre de una acción, busca sus roles permitidos en utils/permissions.js y compara con req.user.role, corta con 403 si no coincide
 │   └── utils/
 │       ├── logger.js
 │       ├── hash.js                  # hashPassword / comparePassword con bcrypt (usado por la estrategia 'register')
@@ -190,6 +190,7 @@ proyecto-eventos/
 │       ├── validators.js            # validación de campos de registro, eventos y tickets (EVENT_STATUSES, TICKET_STATUSES, reglas de fecha/capacity/price/quantity), normalización de email y escapeRegex
 │       ├── reservationCode.js       # genera el código único de cada ticket
 │       ├── mailer.js                # Nodemailer: arma el transporter desde config (MAIL_*) y envía el email de confirmación
+│       ├── permissions.js           # Matriz de permisos centralizada: { ACCION: [roles permitidos] }, consumida por authorize.middleware.js
 │       └── apiError.js              # Error con status HTTP para cortar temprano desde las capas inferiores
 ├── .env.example
 ├── .gitignore
@@ -214,20 +215,22 @@ Desde la pre-entrega 7, `Ticket` relaciona usuarios con eventos (inscripciones),
 | GET    | `/api/health`                | Verifica que el servidor está activo                    | No |
 | GET    | `/api/events`                | Lista eventos, con filtros, paginación y orden           | No |
 | GET    | `/api/events/:id`            | Detalle de un evento (404 si no existe)                  | No |
-| POST   | `/api/events`                | Crea un evento (queda asociado al usuario que lo crea)   | **Sí** — `auth` + `authorize(['organizer','admin'])` |
-| PUT    | `/api/events/:id`            | Modifica un evento                                       | **Sí** — `auth` + `authorize(['organizer','admin'])` + dueño del evento (o admin) |
-| PATCH  | `/api/events/:id/status`     | Cambia el estado de un evento (incluye cancelarlo)       | **Sí** — `auth` + `authorize(['organizer','admin'])` + dueño del evento (o admin) |
+| POST   | `/api/events`                | Crea un evento (queda asociado al usuario que lo crea)   | **Sí** — `auth` + `authorize('MANAGE_EVENTS')` |
+| PUT    | `/api/events/:id`            | Modifica un evento                                       | **Sí** — `auth` + `authorize('MANAGE_EVENTS')` + dueño del evento (o admin) |
+| PATCH  | `/api/events/:id/status`     | Cambia el estado de un evento (incluye cancelarlo)       | **Sí** — `auth` + `authorize('MANAGE_EVENTS')` + dueño del evento (o admin) |
 | POST   | `/api/events/:eid/tickets`   | Inscribirse a un evento (crea un ticket)                 | **Sí** — `auth` (cualquier rol) |
-| GET    | `/api/events/:eid/tickets`   | Lista los inscriptos a un evento                         | **Sí** — `auth` + `authorize(['organizer','admin'])` + dueño del evento (o admin) |
+| GET    | `/api/events/:eid/tickets`   | Lista los inscriptos a un evento                         | **Sí** — `auth` + `authorize('VIEW_EVENT_TICKETS')` + dueño del evento (o admin) |
 | GET    | `/api/tickets/my-tickets`    | Lista las inscripciones propias del usuario autenticado  | **Sí** — `auth` |
 | PATCH  | `/api/tickets/:tid/cancel`   | Cancela una inscripción                                  | **Sí** — `auth` + dueño del ticket (o admin) |
 | POST   | `/api/sessions/register`     | Registro seguro de usuarios                             | No |
 | POST   | `/api/sessions/login`        | Login: valida credenciales y setea la cookie de sesión  | No |
 | GET    | `/api/sessions/current`      | Devuelve `{ id, email, role }` del usuario autenticado  | **Sí** — `auth` |
 | POST   | `/api/sessions/logout`       | Cierra la sesión (borra la cookie)                       | No |
-| GET    | `/api/users`                 | Lista todos los usuarios (ruta administrativa)           | **Sí** — `auth` + `authorize(['admin'])` |
+| GET    | `/api/users`                 | Lista todos los usuarios (ruta administrativa)           | **Sí** — `auth` + `authorize('VIEW_USERS')` |
 
 > **Nota:** en la pre-entrega 5, "modificar/cancelar" un evento era `PATCH`/`DELETE /api/events/:id`, y `DELETE` borraba el documento. Esta entrega lo reemplaza por `PUT /api/events/:id` (modificar campos) y `PATCH /api/events/:id/status` (cambiar estado, incluida la cancelación), porque la consigna explícitamente pide no borrar eventos físicamente.
+>
+> **Nota:** desde las correcciones post-entrega (ver **"Correcciones aplicadas"** al final), `authorize` ya no recibe un array de roles hardcodeado por ruta (`authorize(['organizer','admin'])`): recibe el nombre de una acción (`authorize('MANAGE_EVENTS')`) y consulta los roles permitidos en `utils/permissions.js`, la matriz de permisos centralizada.
 
 ## Autenticación con Passport.js
 
@@ -252,19 +255,22 @@ El sistema define tres roles, en el campo `role` del modelo `User` (`enum: ['use
 
 ### Matriz de permisos
 
+La tabla de abajo es la versión "para leer"; la fuente de verdad real vive en código, en **`src/utils/permissions.js`** (`PERMISSIONS`, un objeto `{ ACCION: [roles permitidos] }`). Antes cada ruta hardcodeaba su propio array de roles (`authorize(['organizer', 'admin'])` repetido en varios routers), así que la matriz de permisos terminaba repartida entre las rutas y esta tabla del README, sin un lugar único donde consultarla o cambiarla. Ahora los routers solo declaran qué **acción** están protegiendo (`authorize('MANAGE_EVENTS')`, `authorize('VIEW_USERS')`, etc.) y es `authorize` quien resuelve esa acción contra `permissions.js` — ver la sección **"Correcciones aplicadas"** al final para el detalle de este ajuste.
+
 | Acción                              | `user` | `organizer` | `admin` |
 |--------------------------------------|:------:|:-----------:|:-------:|
 | Consultar eventos (`GET /api/events`, `GET /api/events/:id`) | ✅ | ✅ | ✅ |
-| Crear eventos (`POST /api/events`)   | ❌ | ✅ | ✅ |
-| Modificar/cambiar estado de eventos **propios** (`PUT`/`PATCH .../status`) | ❌ | ✅ | ✅ |
+| Crear eventos (`POST /api/events`) — acción `MANAGE_EVENTS`  | ❌ | ✅ | ✅ |
+| Modificar/cambiar estado de eventos **propios** (`PUT`/`PATCH .../status`) — acción `MANAGE_EVENTS` | ❌ | ✅ | ✅ |
 | Modificar/cambiar estado de **cualquier** evento | ❌ | ❌ | ✅ |
-| Ver todos los usuarios (`GET /api/users`) | ❌ | ❌ | ✅ |
+| Ver inscriptos de un evento (`GET /api/events/:eid/tickets`) — acción `VIEW_EVENT_TICKETS`, solo del evento propio | ❌ | ✅ | ✅ |
+| Ver todos los usuarios (`GET /api/users`) — acción `VIEW_USERS` | ❌ | ❌ | ✅ |
 
 ### Los dos middlewares (y por qué están separados)
 
 - **`middlewares/auth.middleware.js` — autenticación.** Responde la pregunta *"¿quién sos?"*. Lee el JWT de la cookie `currentUser`, lo valida con la estrategia `current` de Passport y arma `req.user = { id, email, role }`. Si no hay cookie, o el token es inválido/expiró, corta la cadena con **401** antes de llegar a cualquier lógica de negocio. No sabe nada de roles ni de rutas específicas: es el mismo middleware para todas las rutas privadas.
 
-- **`middlewares/authorize.middleware.js` — autorización.** Responde la pregunta *"¿te dejo hacer esto?"*. Se usa siempre después de `auth` (necesita que `req.user` ya exista). Es una función que recibe la lista de roles permitidos y devuelve el middleware real: `authorize(['organizer', 'admin'])`. Si `req.user.role` no está en esa lista, corta con **403**. Es genérico y reutilizable: no conoce el recurso sobre el que se está actuando, solo compara roles.
+- **`middlewares/authorize.middleware.js` — autorización.** Responde la pregunta *"¿te dejo hacer esto?"*. Se usa siempre después de `auth` (necesita que `req.user` ya exista). Es una función que recibe el **nombre de una acción** y devuelve el middleware real: `authorize('MANAGE_EVENTS')`. Internamente busca los roles permitidos para esa acción en `utils/permissions.js` (`rolesFor(action)`); si `req.user.role` no está entre esos roles, corta con **403**. Sigue siendo genérico y reutilizable — no conoce el recurso sobre el que se está actuando, solo resuelve la acción contra la matriz y compara roles — pero ya no requiere que cada ruta sepa (ni repita) qué roles corresponden.
 
 - **Validación de propiedad (ownership) — en el service, no en un middleware.** Que un `organizer` solo pueda modificar/cancelar *sus propios* eventos no se puede resolver solo mirando el rol: hay que ir a buscar el evento a la base y comparar su campo `organizer` contra `req.user.id`. Por eso esa regla vive en `services/events.service.js` (función `assertCanManageEvent`), después de que `auth` y `authorize` ya dejaron pasar la petición. Si el evento no existe, responde 404; si existe pero no le pertenece (y el usuario no es `admin`), responde 403.
 
@@ -471,6 +477,14 @@ Al inscribirse (`POST /api/events/:eid/tickets`), en este orden:
 4. **No hay ya una inscripción activa del mismo usuario para ese evento** — la regla elegida para este proyecto es **una inscripción activa por usuario y evento**; si alguien quiere reservar varios lugares (por ejemplo, para acompañantes), lo hace con `quantity` en esa única inscripción, no creando varios tickets. Un ticket `cancelled` no cuenta como "activo": después de cancelar, ese mismo usuario puede volver a inscribirse.
 5. **Hay cupo suficiente**: se sí calcula sumando el `quantity` de todos los tickets **activos** (`status` distinto de `cancelled`) de ese evento, y comparando `event.capacity - ocupado >= quantity solicitada`. Los tickets `cancelled` **nunca** cuentan como cupo ocupado — por eso cancelar libera el lugar automáticamente, sin ninguna lógica adicional aparte de excluir `cancelled` del cálculo.
 
+#### Condición de carrera: dos inscripciones simultáneas
+
+Los pasos 4 y 5 primero **leen** el estado actual (¿ya tiene ticket activo?, ¿cuánto cupo queda?) y recién después **escriben** el ticket nuevo. Si dos requests llegan casi al mismo tiempo, los dos pueden leer "hay cupo" (o "no tiene inscripción activa") antes de que ninguno haya escrito nada todavía, y terminar creando ambos tickets aunque solo quedara lugar para uno. Esto se blinda con tres mecanismos, explicados en detalle en **"Correcciones aplicadas"** al final:
+
+- El chequeo de duplicado, el chequeo de cupo y la creación del ticket corren dentro de **una misma transacción de MongoDB** (`session.withTransaction` en `services/tickets.service.js`).
+- Dentro de esa transacción, un "toque" al documento del **evento** (`eventsRepository.touchForCapacityLock`) fuerza que dos inscripciones concurrentes al mismo evento choquen de verdad en Mongo (en vez de poder confirmar las dos en paralelo sin verse) — necesario porque cada una inserta un ticket propio, sin nada más en común que las hiciera "chocar" solas.
+- El modelo `Ticket` tiene además un **índice único parcial** sobre `user`+`event` (solo para tickets activos), como defensa extra para el caso de un mismo usuario duplicando su propia inscripción: aunque algo se colara igual, Mongo rechaza el segundo `insert` a nivel de base de datos, y el service traduce ese error a 409.
+
 Al cancelar (`PATCH /api/tickets/:tid/cancel`):
 
 - El ticket tiene que existir (404 si no).
@@ -561,6 +575,8 @@ Requiere ser el dueño del ticket, o `admin`.
 Al confirmarse una inscripción, `services/tickets.service.js` llama a `utils/mailer.js`, que arma un transporter de Nodemailer con las variables `MAIL_HOST`/`MAIL_PORT`/`MAIL_USER`/`MAIL_PASS` (nunca hardcodeadas) y le manda al email del usuario (`req.user.email`, del JWT) un resumen: evento, fecha, cantidad y código de reserva. Ver **"Configurar el envío de emails"** más arriba para dejarlo funcionando con Ethereal.
 
 Es una notificación "best effort": si `MAIL_*` no está configurado, o el envío falla por cualquier motivo, se loguea y la función simplemente retorna — la inscripción ya se guardó en la base antes de intentar el envío, así que un problema de email nunca hace fallar la inscripción en sí.
+
+El transporter de Nodemailer se crea con `connectionTimeout`/`greetingTimeout`/`socketTimeout` explícitos (10 segundos cada uno) en vez de dejar los default de la librería (hasta 10 minutos de `socketTimeout`). Como el envío se espera (`await`) antes de responderle al cliente, sin este límite un SMTP lento o caído dejaría la inscripción entera colgada esperando el email — exactamente lo que "best effort" quiere evitar. Con el timeout, en el peor caso tarda ~10 segundos en desistir y responder igual.
 
 ### Cómo probarlo (PowerShell)
 
@@ -657,6 +673,8 @@ Content-Type: application/json
 ```json
 { "status": "error", "message": "El email ya está registrado" }
 ```
+
+> **Nota:** este 409 sale de dos caminos distintos, con el mismo resultado para quien llama. El camino normal es el chequeo explícito: la estrategia `register` busca el email antes de crear el usuario. El camino "de carrera" es cuando dos registros con el mismo email llegan casi juntos y ambos pasan ese chequeo antes de que ninguno haya insertado nada todavía — ahí es el índice `unique` de Mongo sobre `email` el que rechaza el segundo insert (error de clave duplicada, código `11000`), y la estrategia lo atrapa y lo traduce al mismo 409, en vez de dejarlo caer como un 500 sin manejar. Ver **"Correcciones aplicadas"** al final para el detalle.
 
 **503 — no hay conexión a la base de datos** (revisá `MONGO_URL`):
 
@@ -834,8 +852,33 @@ Para estos casos hace falta un evento en estado `published` con `capacity` chica
 6. **Inscripción duplicada activa**: con un usuario que ya tiene un ticket activo para ese evento, probá inscribirlo de nuevo → 409 `"Ya tenés una inscripción activa para este evento"`.
 7. **Cancelación propia libera el cupo**: cancelá uno de los tickets del paso 5 (`PATCH /api/tickets/:tid/cancel`) y volvé a intentar la inscripción que había fallado por falta de cupo → ahora tiene que dar 201.
 8. **Cancelación de un ticket ajeno como `user`** → 403 `"Solo podés cancelar tus propias inscripciones"`.
-9. **`GET /api/events/:eid/tickets` como `user` común** → 403 (el middleware `authorize(['organizer','admin'])` ni deja pasar el rol).
+9. **`GET /api/events/:eid/tickets` como `user` común** → 403 (el middleware `authorize('VIEW_EVENT_TICKETS')` ni deja pasar el rol).
 10. **`GET /api/events/:eid/tickets` como `organizer` de **otro** evento** (no el dueño de `:eid`) → 403 `"Solo podés ver las inscripciones de tus propios eventos"`.
+
+### Correcciones tras la devolución de la pre-entrega 7
+
+1. **Matriz de permisos centralizada**: cualquiera de los casos de "Roles y autorización" de arriba (por ejemplo, `POST /api/events` con rol `user` → 403) tiene que seguir dando el mismo resultado que antes — lo único que cambió es que `authorize` ahora resuelve los roles permitidos consultando `utils/permissions.js` en vez de recibirlos hardcodeados en la ruta.
+2. **Registro con emails en carrera**: mandar, casi al mismo tiempo (por ejemplo, dos `Invoke-RestMethod` sin esperar la respuesta del primero, o `Start-Job`), dos `POST /api/sessions/register` con el mismo email → uno de los dos tiene que dar 201 y el otro 409 `"El email ya está registrado"` — nunca un 500.
+3. **Cupos con inscripciones en carrera**: con un evento `published` de `capacity: 1`, mandar dos `POST /api/events/:eid/tickets` casi simultáneos de dos usuarios distintos → solo uno de los dos tiene que dar 201; el otro, 409 `"No hay cupos suficientes: quedan 0 disponibles"` (nunca los dos con 201, que sería vender de más el cupo).
+
+## Correcciones aplicadas
+
+Después de entregada la pre-entrega 7, la devolución de la cátedra marcó tres ajustes puntuales sobre entregas ya corregidas (pre-entrega 2, pre-entrega 5 y pre-entrega 7). Se implementaron los tres sobre `main`, sin volver a tocar los commits/tags ya entregados de esas pre-entregas (esos tags siguen representando el estado exacto que se corrigió en su momento).
+
+**1. Matriz de permisos centralizada** (devolución de la pre-entrega 5). Antes, cada ruta privada hardcodeaba su propio array de roles permitidos (`authorize(['organizer', 'admin'])`, repetido en `events.router.js` y `users.router.js`), y ese mismo array se repetía a mano en este README. Si mañana cambiara quién puede hacer qué, había que acordarse de tocar cada ruta por separado. Ahora existe **`src/utils/permissions.js`**, con un único objeto `PERMISSIONS` que mapea cada acción (`MANAGE_EVENTS`, `VIEW_EVENT_TICKETS`, `VIEW_USERS`) a sus roles permitidos, y `middlewares/authorize.middleware.js` recibe el **nombre de la acción**, no el array: `authorize('MANAGE_EVENTS')` en vez de `authorize(['organizer', 'admin'])`. El comportamiento externo (qué rol puede hacer qué, y los 401/403 que devuelve) no cambió — lo que cambió es que ahora hay un solo lugar para leerlo o modificarlo.
+
+**2. Registro con emails duplicados en carrera** (devolución de la pre-entrega 2). La estrategia `register` de Passport ya validaba que el email no estuviera repetido (`usersRepository.findByEmail` antes de crear), pero ese chequeo y el `create()` posterior no son atómicos entre sí: si dos registros con el mismo email llegaban casi al mismo tiempo, los dos podían pasar el chequeo "no existe" antes de que ninguno hubiera insertado nada, y el segundo `insert` terminaba chocando contra el índice `unique` de Mongo sobre `email` con un error de clave duplicada (código `11000`) que no tenía `.status` — el `errorHandler` central lo traducía a un 500 sin manejar, en vez del 409 que corresponde. Ahora el `catch` de la estrategia `register` (en `config/passport.config.js`) detecta ese código específico y responde el mismo 409 `"El email ya está registrado"` que el chequeo explícito, así la condición de carrera da exactamente el mismo resultado que el caso normal.
+
+**3. Carrera de cupos en las inscripciones** (devolución de la pre-entrega 7). En `createTicket` (`services/tickets.service.js`), el chequeo de "¿ya tiene inscripción activa?", el chequeo de "¿hay cupo?" y la creación del ticket eran tres operaciones separadas: leer, leer, escribir. Si dos inscripciones (del mismo usuario, o de usuarios distintos peleando el último lugar) llegaban casi juntas, ambas podían leer "hay cupo" antes de que ninguna hubiera escrito el ticket, y las dos terminaban creándolo — vendiendo de más el cupo, o duplicando la inscripción de un mismo usuario. Se blindó con dos mecanismos, sumados según lo que pedía la devolución ("índice único parcial (...) y/o transacción atómica"):
+
+   - Las tres operaciones (chequeo de duplicado, chequeo de cupo, creación del ticket) ahora corren dentro de **una misma transacción de MongoDB** (`mongoose.startSession()` + `session.withTransaction(...)`). Esto requiere que `MONGO_URL` apunte a un **replica set** — MongoDB Atlas siempre lo es, incluso en el plan gratuito M0, así que no hace falta ningún cambio de configuración para quien ya sigue la guía de este README; un Mongo local standalone, en cambio, no soporta transacciones multi-documento.
+   - Como defensa adicional, independiente de que las transacciones estén disponibles o no, el modelo `Ticket` (`models/Ticket.js`) tiene un **índice único parcial** sobre `user`+`event`, con `partialFilterExpression: { status: { $ne: 'cancelled' } }`: a nivel de base de datos, no puede existir más de un ticket activo del mismo usuario para el mismo evento. Si algo se colara igual, Mongo rechaza el `insert` con un error de clave duplicada (código `11000`), que el `catch` de `createTicket` traduce al mismo 409 `"Ya tenés una inscripción activa para este evento"`.
+
+   La carrera por el *cupo* en sí (dos usuarios **distintos** peleando el último lugar) necesitaba un paso más, que solo se descubrió probando esto con jobs concurrentes de PowerShell: una transacción sola **no alcanza** cuando las dos operaciones concurrentes escriben documentos distintos sin nada en común (cada una inserta *su propio* ticket) — Mongo no tiene por qué detectar que las dos transacciones están compitiendo, y en teoría las dos podían leer "hay 1 lugar libre" y confirmar en paralelo sin verse, vendiendo el mismo cupo dos veces. La solución fue agregar, al principio de la transacción, un "toque" al documento del **evento** (`eventsRepository.touchForCapacityLock`, un `updateOne` que no cambia ningún dato visible, solo `updatedAt`): como ahora las dos transacciones concurrentes sí escriben sobre el *mismo* documento, Mongo fuerza un choque real (`WriteConflict`) entre ellas — una se confirma, la otra se reintenta automáticamente (`withTransaction` lo hace solo) y, al reintentar, vuelve a calcular el cupo ya con el ticket de la primera contado.
+
+   Probando esto también se encontró que el envío del email de confirmación (`utils/mailer.js`) no tenía ningún timeout explícito: como se espera (`await`) antes de responderle al cliente, un SMTP lento o caído podía dejar la inscripción entera colgada esperando esa respuesta (los timeouts por defecto de Nodemailer llegan hasta 10 minutos). Se le agregaron `connectionTimeout`/`greetingTimeout`/`socketTimeout` de 10 segundos al transporter, así "best effort" se cumple también en el peor caso: si el email no sale, desiste rápido y responde igual.
+
+   Una tercera cosa que salió a la luz recién al forzar la carrera con dos jobs reales de PowerShell: `tickets.dao.js` le pasaba la `session` a `Ticket.create(ticketData, { session })` con `ticketData` como un objeto suelto — Mongoose solo reconoce las opciones (incluida `session`) como segundo argumento cuando el primero es un **array** de documentos; con un solo objeto, termina interpretando mal los argumentos y la creación del ticket fallaba con un error de validación ("todos los campos son requeridos"). Se corrigió envolviendo siempre `ticketData` en un array (`Ticket.create([ticketData], { session })`), que es la forma que Mongoose sí soporta.
 
 ## Próximas entregas
 

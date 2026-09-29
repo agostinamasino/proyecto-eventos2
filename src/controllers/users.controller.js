@@ -1,4 +1,5 @@
 import usersService from '../services/users.service.js';
+import { toAdminUserSummary } from '../dto/user.dto.js';
 
 /**
  * Ruta administrativa: ver todos los usuarios. La ruta ya exigió
@@ -8,7 +9,7 @@ import usersService from '../services/users.service.js';
 export const listUsers = async (req, res, next) => {
   try {
     const users = await usersService.getAllUsers();
-    res.status(200).json({ status: 'success', payload: users });
+    res.status(200).json({ status: 'success', payload: users.map(toAdminUserSummary) });
   } catch (error) {
     next(error);
   }

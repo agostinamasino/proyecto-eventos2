@@ -1,34 +1,5 @@
 import ticketsService from '../services/tickets.service.js';
-
-/** Ticket "plano", con `user`/`event` como ids — para las rutas que no necesitan el detalle del evento. */
-const toPublicTicket = (ticketDoc) => ({
-  id: ticketDoc._id,
-  user: ticketDoc.user,
-  event: ticketDoc.event,
-  status: ticketDoc.status,
-  quantity: ticketDoc.quantity,
-  reservationCode: ticketDoc.reservationCode,
-  createdAt: ticketDoc.createdAt,
-  cancelledAt: ticketDoc.cancelledAt,
-});
-
-/** Ticket con el evento poblado (solo title/date/location) — para "mis tickets". */
-const toMyTicket = (ticketDoc) => ({
-  id: ticketDoc._id,
-  status: ticketDoc.status,
-  quantity: ticketDoc.quantity,
-  reservationCode: ticketDoc.reservationCode,
-  createdAt: ticketDoc.createdAt,
-  cancelledAt: ticketDoc.cancelledAt,
-  event: ticketDoc.event
-    ? {
-        id: ticketDoc.event._id,
-        title: ticketDoc.event.title,
-        date: ticketDoc.event.date,
-        location: ticketDoc.event.location,
-      }
-    : null,
-});
+import { toPublicTicket, toMyTicket } from '../dto/ticket.dto.js';
 
 /** POST /api/events/:eid/tickets — inscribirse a un evento. Cualquier usuario autenticado. */
 export const createTicket = async (req, res, next) => {

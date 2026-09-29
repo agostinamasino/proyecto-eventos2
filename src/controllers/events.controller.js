@@ -1,24 +1,5 @@
 import eventsService from '../services/events.service.js';
-
-/**
- * Deja un evento listo para responder con `id` (string) en vez del `_id`
- * crudo de Mongoose, y con `organizer` como el id de su dueño (nunca el
- * objeto usuario completo).
- */
-const toPublicEvent = (eventDoc) => ({
-  id: eventDoc._id,
-  title: eventDoc.title,
-  description: eventDoc.description,
-  category: eventDoc.category,
-  date: eventDoc.date,
-  location: eventDoc.location,
-  capacity: eventDoc.capacity,
-  price: eventDoc.price,
-  status: eventDoc.status,
-  organizer: eventDoc.organizer,
-  createdAt: eventDoc.createdAt,
-  updatedAt: eventDoc.updatedAt,
-});
+import { toPublicEvent } from '../dto/event.dto.js';
 
 /** GET /api/events — pública, con filtros + paginación + orden. */
 export const listEvents = async (req, res, next) => {

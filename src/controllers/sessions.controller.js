@@ -1,6 +1,7 @@
 import passport from '../config/passport.config.js';
 import config from '../config/config.js';
 import { signToken } from '../utils/jwt.js';
+import { toPublicUser, toCurrentUser } from '../dto/user.dto.js';
 
 const AUTH_COOKIE_NAME = 'currentUser';
 
@@ -13,15 +14,6 @@ const authCookieOptions = () => ({
   httpOnly: true,
   sameSite: 'lax',
   secure: config.nodeEnv === 'production',
-});
-
-/** Deja el usuario listo para responder, sin exponer el password. */
-const toPublicUser = (userDoc) => ({
-  id: userDoc._id,
-  first_name: userDoc.first_name,
-  last_name: userDoc.last_name,
-  email: userDoc.email,
-  role: userDoc.role,
 });
 
 /**
@@ -73,8 +65,7 @@ export const login = (req, res, next) => {
 // req.user ya viene cargado por el middleware `auth`, que envuelve la
 // estrategia 'current' de Passport (ver middlewares/auth.middleware.js).
 export const current = (req, res) => {
-  const { id, email, role } = req.user;
-  res.status(200).json({ status: 'success', payload: { id, email, role } });
+  res.status(200).json({ status: 'success', payload: toCurrentUser(req.user) });
 };
 
 // Logout no pasa por Passport: solo borra la cookie.

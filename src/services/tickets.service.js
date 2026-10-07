@@ -35,16 +35,23 @@ const findTicketOrFail = async (ticketId) => {
  * 2. El evento está `published` (mensajes distintos si está `cancelled`,
  *    `finished` o todavía en `draft`, aunque las tres son, en el fondo,
  *    "no está publicado").
- * 3. `quantity` es un entero > 0 (default 1 si no se manda).
- * 4. El usuario no tiene ya un ticket activo para este evento — la regla
+ * 3. La fecha del evento no pasó. `status: 'finished'` es una transición
+ *    manual (vía `PATCH /api/events/:id/status`): nada la dispara sola
+ *    cuando llega la fecha del evento. Sin este chequeo, un evento
+ *    `published` cuya fecha ya pasó (porque nadie lo marcó `finished` a
+ *    tiempo) seguiría aceptando inscripciones nuevas. Se responde el
+ *    mismo 409 que un evento ya `finished`, porque para quien se quiere
+ *    inscribir el resultado es el mismo: no se puede.
+ * 4. `quantity` es un entero > 0 (default 1 si no se manda).
+ * 5. El usuario no tiene ya un ticket activo para este evento — la regla
  *    elegida es **una inscripción activa por usuario y evento**; si se
  *    quieren reservar varios lugares, se hace con `quantity` en esa
  *    única inscripción.
- * 5. Hay cupo disponible: `capacity - (suma de quantity de tickets
+ * 6. Hay cupo disponible: `capacity - (suma de quantity de tickets
  *    activos)` tiene que ser >= la `quantity` pedida. Los tickets
  *    `cancelled` no cuentan como cupo ocupado.
  *
- * Carrera de cupos (dos requests simultáneos): los pasos 4 y 5 leen el
+ * Carrera de cupos (dos requests simultáneos): los pasos 5 y 6 leen el
  * estado actual (¿ya tiene ticket activo?, ¿cuánto cupo queda?) y recién
  * después escriben el ticket nuevo. Si dos requests llegan casi juntos,
  * ambos pueden leer "hay cupo" antes de que ninguno haya escrito nada, y
@@ -86,6 +93,9 @@ export const createTicket = async (eventId, { quantity } = {}, currentUser) => {
   }
   if (event.status !== 'published') {
     throw new ApiError(409, 'El evento todavía no está publicado');
+  }
+  if (new Date(event.date).getTime() < Date.now()) {
+    throw new ApiError(409, 'El evento ya finalizó');
   }
 
   const requestedQuantity = quantity === undefined ? 1 : Number(quantity);
